@@ -1,0 +1,246 @@
+{
+   "AWSTemplateFormatVersion" : "2010-09-09",
+   "Description" : "Creates ECS Cluster, Launch Configuration, Auto Scaling Group, Security group, EC2 Instance and configures a Squid Proxy in a private Subnet - MadhuKumar - 09April2020",
+
+   "Parameters" :
+   {
+      "TemplateVersion":{
+         "Default": "1.0",
+         "Description": "Version of the CloudFormation template. All parameters with sensitive information should be secured in a vault (e.g. Parameter Store and Secrets Manager)",
+         "Type":"String"
+      },
+      "ClusterName" :
+      {
+         "Type" : "String",
+         "Default" : "mk-test-cluster",
+         "Description" : "Name of the ECS Cluster"
+      },
+      "SquidProxy" :
+      {
+         "Type" : "String",
+         "Default" : "mk-squid-proxy:3128",
+         "Description" : "Name of the squid proxy for reaching AWS endpoints"
+      },
+      "EC2InstanceProfile" :
+      {
+         "Type" : "String",
+         "Default" : "arn:aws:iam::xxxxxxxxx:instance-profile/mktestrole",
+         "Description" : "Name of an existing EC2 Instance Profile."
+      },
+      "ResourceType":{
+         "Type": "String",
+         "Default" : "Application",
+         "AllowedValues" : [ "Network", "Application", "Database" ],
+         "Description": "Enter Network, Application, Database. Default is Application"
+      },
+      "EnvironmentType":{
+         "Type": "String",
+         "Default" : "Development",
+         "AllowedValues" : [ "Development", "Testing", "Production" ],
+         "Description": "Enter relevant Environment e.g. Development, Testing, Production. Default is Development"
+      },
+      "KeyName" :
+      {
+         "Type" : "AWS::EC2::KeyPair::KeyName",
+         "Default" : "mk-test-keypair",
+         "Description" : "Name of an existing EC2 KeyPair to enable SSH access to the ECS instances"
+      },
+      "VpcId" :
+      {
+         "Type" : "AWS::EC2::VPC::Id",
+         "Default" : "vpc-xxxxxxxxxx",
+         "Description" : "Select a VPC. Default is blue-shared-non-prod"
+      },
+      "PrivateSubnetAZ1" :
+      {
+         "Description" : "Name of the Subnet for Availability Zone 1a",
+         "Type" : "AWS::EC2::Subnet::Id",
+         "Default" : "subnet-xxxxxxxxxxx"
+      },
+      "PrivateSubnetAZ2" :
+      {
+         "Description" : "Name of the Subnet for Availability Zone 1b",
+         "Type" : "AWS::EC2::Subnet::Id",
+         "Default" : "subnet-xxxxxxxxxxx"
+      },
+      "DesiredCapacity" :
+      {
+         "Type" : "Number",
+         "Default" : "1",
+         "Description" : "Number of instances to launch in your ECS cluster"
+      },
+      "MinSize" :
+      {
+         "Type" : "Number",
+         "Default" : "1",
+         "Description" : "Minimum number of instances that can be launched in your ECS cluster"
+      },
+      "MaxSize" :
+      {
+         "Type" : "Number",
+         "Default" : "1",
+         "Description" : "Maximum number of instances that can be launched in your ECS cluster"
+      },
+      "EBSVolume" :
+      {
+         "Type" : "Number",
+         "Default" : "20",
+         "Description" : "Enter the size of the EBS volume"
+      },
+      "AMIName" :
+      {
+         "Type" : "AWS::SSM::Parameter::Value<AWS::EC2::Image::Id>",
+         "Default" : "/aws/service/ecs/optimized-ami/amazon-linux-2/recommended/image_id",
+         "Description" : "Default value will always fetch the latest version of Amazon ECS-optimized Amazon Linux 2 AMI ID from AWS. This is to make sure latest security patches are included"
+      },
+      "InstanceType" :
+      {
+         "Description" : "EC2 instance type",
+         "Type" : "String",
+         "Default" : "t2.medium",
+         "AllowedValues" : [ "t2.micro", "t2.small", "t2.medium", "t2.large", "t3.medium", "m3.medium", "m3.large", "m3.xlarge", "m3.2xlarge", "m4.large" ],
+         "ConstraintDescription" : "Please choose a valid instance type."
+      }
+   },
+   "Resources" :
+   {
+      "ECSCluster" :
+      {
+         "Type" : "AWS::ECS::Cluster",
+         "Properties" :
+         {
+            "ClusterName" : { "Ref" : "ClusterName" },
+            "Tags" :
+            [ {  "Key" : "Resource", "Value" : {"Ref": "ResourceType"} },
+              {  "Key" : "Environment", "Value" : {"Ref": "EnvironmentType"} }
+            ]
+         }
+      },
+      "EcsSecurityGroup" :
+      {
+         "Type" : "AWS::EC2::SecurityGroup",
+         "Properties" :
+         {
+            "GroupDescription" : "ECS Security Group",
+            "VpcId" : { "Ref" : "VpcId" },
+            "Tags" :
+            [ {  "Key" : "Resource", "Value" : {"Ref": "ResourceType"} },
+               {  "Key" : "Environment", "Value" : {"Ref": "EnvironmentType"} }
+            ]
+         }
+      },
+      "EcsSecurityGroupSSHinbound" :
+      {
+         "Type" : "AWS::EC2::SecurityGroupIngress",
+         "Properties" :
+         {
+            "GroupId" : { "Ref" : "EcsSecurityGroup" },
+            "Description" : "Enable SSH (22) access from Internal Network",
+            "IpProtocol" : "tcp",
+            "FromPort" : "22",
+            "ToPort" : "22",
+            "CidrIp" : "10.x.x.x/16"
+         }
+      },
+      "EcsSecurityGroupHTTPSinbound" :
+      {
+         "Type" : "AWS::EC2::SecurityGroupIngress",
+         "Properties" :
+         {
+            "GroupId" : { "Ref" : "EcsSecurityGroup" },
+            "Description" : "Enable HTTPS (443) access via ALB",
+            "IpProtocol" : "tcp",
+            "FromPort" : "443",
+            "ToPort" : "443",
+            "SourceSecurityGroupId" : { "Ref" : "EcsSecurityGroup" }
+         }
+      },
+      "EcsSecurityGroupALBports" :
+      {
+         "Type" : "AWS::EC2::SecurityGroupIngress",
+         "Properties" :
+         {
+            "GroupId" : { "Ref" : "EcsSecurityGroup" },
+            "Description" : "Enable ALB ports",
+            "IpProtocol" : "tcp",
+            "FromPort" : "31000",
+            "ToPort" : "61000",
+            "SourceSecurityGroupId" : { "Ref" : "EcsSecurityGroup" }
+         }
+      },
+      "LaunchConfig" :
+      {
+         "Type" : "AWS::AutoScaling::LaunchConfiguration",
+         "Properties" :
+         {
+            "ImageId" : { "Ref" : "AMIName" },
+            "SecurityGroups" :
+            [
+               { "Ref" : "EcsSecurityGroup" }
+            ],
+            "InstanceType" : { "Ref" : "InstanceType" },
+            "IamInstanceProfile" : { "Ref" : "EC2InstanceProfile" },
+            "BlockDeviceMappings" :
+            [
+               {
+                  "DeviceName" : "/dev/sdk",
+                  "Ebs" : { "VolumeSize" : { "Ref" : "EBSVolume" } }
+               }
+            ],
+            "KeyName" : { "Ref" : "KeyName" },
+            "UserData" :
+            {
+               "Fn::Base64" :
+               {
+                  "Fn::Join" :
+                  [
+                     "",
+                     [
+                        "#!/bin/bash -xe\n",
+                        "echo ECS_CLUSTER=",
+                        { "Ref" : "ECSCluster" },
+                        " >> /etc/ecs/ecs.config\n",
+                        "echo HTTP_PROXY=",
+                        { "Ref" : "SquidProxy" },
+                        " >> /etc/ecs/ecs.config\n",
+                        "echo HTTPS_PROXY=",
+                        { "Ref" : "SquidProxy" },
+                        " >> /etc/ecs/ecs.config\n",
+                        "echo NO_PROXY=169.254.169.254,169.254.170.2,/var/run/docker.sock,.amazonaws.com",
+                        " >> /etc/ecs/ecs.config\n",
+                        "sudo systemctl restart docker\n",
+                        "yum install -y aws-cfn-bootstrap\n",
+                        "/opt/aws/bin/cfn-signal -e $? ",
+                        "         --stack ",
+                        { "Ref" : "AWS::StackName" },
+                        "         --resource ECSAutoScalingGroup ",
+                        "         --region ",
+                        { "Ref" : "AWS::Region" },
+                        "\n"
+                     ]
+                  ]
+               }
+            }
+         }
+      },
+      "ECSAutoScalingGroup" :
+      {
+         "Type" : "AWS::AutoScaling::AutoScalingGroup",
+         "Properties" :
+         {
+            "VPCZoneIdentifier" :
+            [
+               { "Ref" : "PrivateSubnetAZ1" }
+            ],
+            "LaunchConfigurationName" : { "Ref" : "LaunchConfig" },
+            "MinSize" : { "Ref" : "MinSize" },
+            "MaxSize" :  { "Ref" : "MaxSize" },
+            "Tags":[
+               {  "Key" : "Name", "Value" :  { "Fn::Sub" : "ECS Instance - ${AWS::StackName}"  }, "PropagateAtLaunch":"true" },
+               {  "Key" : "Resource", "Value" : {"Ref": "ResourceType"}, "PropagateAtLaunch":"true" },
+               {  "Key" : "Environment", "Value" : {"Ref": "EnvironmentType"},  "PropagateAtLaunch":"true" }
+            ]
+         }
+      }
+   }
+}

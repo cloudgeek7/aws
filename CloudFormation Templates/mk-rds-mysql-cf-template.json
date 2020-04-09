@@ -1,0 +1,211 @@
+{
+    "AWSTemplateFormatVersion" : "2010-09-09",
+    "Description" : "MySQL RDS Template with MultiAZ for high availability and failover support (not read replica) in a private Subnet - MadhuKumar - 09April2020",
+
+    "Parameters" : {
+      "TemplateVersion":{
+        "Default": "1.0",
+        "Description": "Version of the CloudFormation template. All parameters with sensitive information should be secured in a vault (e.g. Parameter Store and Secrets Manager)",
+        "Type":"String"
+      },
+      "VpcId": {
+        "Description": "Choose the VPC ID",
+        "Type": "AWS::EC2::VPC::Id"
+      },
+      "PrivateSubnetAZ1": {
+        "Description": "Name of the Subnet for Availability Zone 1",
+        "Type": "AWS::EC2::Subnet::Id"
+      },
+      "PrivateSubnetAZ2": {
+        "Description": "Name of the Subnet for Availability Zone 2",
+        "Type": "AWS::EC2::Subnet::Id"
+      },
+      "ResourceType":{
+        "Type": "String",
+        "Default" : "Application",
+        "AllowedValues" : [ "Network", "Application", "Database" ],
+        "Description": "Enter Network, Application, Database. Default is Application"
+      },
+      "EnvironmentType":{
+        "Type": "String",
+        "Default" : "Development",
+        "AllowedValues" : [ "Development", "Testing", "Production" ],
+        "Description": "Enter relevant Environment e.g. Development, Testing, Production. Default is Development"
+      },
+      "KmsKey": {
+        "Description": "ARN of the KMS key for encrypting RDS DB. Depending on the data classification, it can be aws managed or has to be a user managed kms key.",
+        "Default": "arn:aws:kms:eu-central-1:xxxxxxxx:key/xxxxxxxx-xxxx-xxxx-xxxx-xxxxxx",
+        "Type" : "String"
+      },
+      "DBName": {
+        "Description" : "The database name",
+        "Type": "String",
+        "MinLength": "4",
+        "MaxLength": "20",
+        "AllowedPattern" : "[a-zA-Z][a-zA-Z0-9]*",
+        "ConstraintDescription" : "must begin with a letter and contain only alphanumeric characters."
+      },
+      "DBUsername": {
+        "NoEcho": "true",
+        "Description" : "The database admin account username",
+        "Type": "String",
+        "MinLength": "5",
+        "MaxLength": "50",
+        "AllowedPattern" : "[a-zA-Z][a-zA-Z0-9]*",
+        "ConstraintDescription" : "must begin with a letter and contain only alphanumeric characters."
+      },
+      "DBPassword": {
+        "NoEcho": "true",
+        "Description" : "The database admin account password",
+        "Type": "String",
+        "MinLength": "12",
+        "ConstraintDescription" : "Minimum length of 12 characters"
+      },
+      "DBClass" : {
+        "Default" : "db.t2.medium",
+        "Description" : "Database instance class",
+        "Type" : "String",
+        "AllowedValues" : [ "db.t2.medium", "db.t2.large", "db.t2.xlarge", "db.t3.medium", "db.t3.large", "db.t3.xlarge", "db.m4.large", "db.m4.xlarge", "db.m5.large", "db.m5.xlarge" ],
+        "ConstraintDescription" : "must select a valid database instance type."
+      },
+      "DBAllocatedStorage" : {
+        "Default": "5",
+        "Description" : "The amount of storage (in gigabytes) to be initially allocated for the database instance. (GB)",
+        "Type": "Number",
+        "MinValue": "1",
+        "ConstraintDescription" : "must be between 1+"
+      },
+      "DBMaxAllocatedStorage" : {
+        "Default": "10",
+        "Description" : "The upper limit to which Amazon RDS can automatically scale the storage of the DB instance. (GB)",
+        "Type": "Number",
+        "MinValue": "10",
+        "ConstraintDescription" : "must be between 10+"
+      },
+
+      "DBEngineVersion":{
+        "Default": "5.7.28",
+        "Description": "The version number of the database engine to use",
+        "Type": "String"
+      },
+      "MajorVersionUpgrade" : {
+        "Default": "False",
+        "Description": "Mention if you want to enable Major version upgrades. Default is False for Production",
+        "Type": "String"
+      },
+
+      "MinorVersionUpgrade" : {
+        "Default": "True",
+        "Description": "Minor version upgrades are enabled by default, to install security patches for RDS along with Minor version upgrade",
+        "Type": "String"
+      },
+      "MaintenanceWindow" : {
+        "Default": "Sun:01:00-Sun:01:30",
+        "Description": "Mention time window for major or minor version updates. Minimum is 30 minutes",
+        "Type": "String"
+      },
+      "BackupRetentionPeriod" : {
+        "Default": "7",
+        "Description": "The number of days for which automated backups should be retained. 7 days for NON-PROD and 30 days for PROD",
+        "MinValue": "1",
+        "Type": "Number"
+      },
+      "PreferredBackupWindow" : {
+        "Default": "03:00-03:30",
+        "Description": "Mention time window for automated backups if automated backups are enabled. Using the BackupRetentionPeriod parameter. Must be at least 30 minutes",
+        "Type": "String"
+      },
+    "AppSecGroup" : {
+      "Description": "Choose the Security Group of the application, which require access to the database",
+      "Type": "AWS::EC2::SecurityGroup::Id"
+    }
+  },
+
+   "Resources" : {
+
+      "DBSecurityGroup": {
+        "Type": "AWS::EC2::SecurityGroup",
+        "Properties" : {
+          "GroupDescription" : "Access to RDS MySQL from application security group",
+          "GroupName" : "SG_RDS_MySQL",
+          "VpcId"        : { "Ref" : "VpcId" },
+          "Tags" :
+          [ {  "Key" : "Resource", "Value" : {"Ref": "ResourceType"} },
+            {  "Key" : "Environment", "Value" : {"Ref": "EnvironmentType"} }
+          ]
+        }
+      },
+
+      "DBSecurityGroupIngress" : {
+        "Type": "AWS::EC2::SecurityGroupIngress",
+        "DependsOn": "DBSecurityGroup",
+        "Properties": {
+            "GroupId": { "Ref": "DBSecurityGroup" },
+            "Description": "MySQL database port reachable only from application security group",
+            "IpProtocol" : "tcp",
+            "FromPort"   : 3306,
+            "ToPort"     : 3306,
+            "SourceSecurityGroupId"     : {"Ref": "AppSecGroup"}
+          }
+        },
+
+      "DBSubnetGroup" : {
+        "Type" : "AWS::RDS::DBSubnetGroup",
+        "Properties" : {
+           "DBSubnetGroupDescription" : "DB Private Subnet",
+           "SubnetIds" : [
+            { "Ref" : "PrivateSubnetAZ1" },
+            { "Ref" : "PrivateSubnetAZ2" }],
+           "Tags" :
+           [ {  "Key" : "Resource", "Value" : {"Ref": "ResourceType"} },
+             {  "Key" : "Environment", "Value" : {"Ref": "EnvironmentType"} }
+           ]
+        }
+      },
+
+      "RDSMySQLDB" : {
+        "Type" : "AWS::RDS::DBInstance",
+        "Properties" : {
+          "DBName" : { "Ref" : "DBName" },
+          "DBInstanceIdentifier" : { "Ref" : "DBName" },
+          "AllocatedStorage" : { "Ref" : "DBAllocatedStorage" },
+          "MaxAllocatedStorage" : { "Ref" : "DBMaxAllocatedStorage" },
+          "DBInstanceClass" : { "Ref" : "DBClass" },
+          "AllowMajorVersionUpgrade" : { "Ref" : "MajorVersionUpgrade" },
+          "AutoMinorVersionUpgrade" : {"Ref": "MinorVersionUpgrade"},
+          "BackupRetentionPeriod" : {"Ref": "BackupRetentionPeriod"},
+          "EnableCloudwatchLogsExports" : [ "error", "general", "slowquery", "audit" ],
+          "VPCSecurityGroups" : [{"Ref": "DBSecurityGroup"}],
+          "EngineVersion" : {"Ref": "DBEngineVersion"},
+          "Engine" : "MySQL",
+          "StorageType" : "gp2",
+          "MultiAZ" : "true",
+          "StorageEncrypted" : "true",
+          "KmsKeyId" : { "Ref" : "KmsKey" },
+          "MasterUsername" : { "Ref" : "DBUsername" } ,
+          "MasterUserPassword" : { "Ref" : "DBPassword" },
+          "DBSubnetGroupName" : { "Ref" : "DBSubnetGroup" },
+          "DBParameterGroupName" : "default.mysql5.7",
+          "PreferredBackupWindow" : {"Ref": "PreferredBackupWindow"},
+          "PreferredMaintenanceWindow" : {"Ref": "MaintenanceWindow"},
+          "PubliclyAccessible" : "false",
+          "Tags" :
+          [ {  "Key" : "Resource", "Value" : {"Ref": "ResourceType"} },
+            {  "Key" : "Environment", "Value" : {"Ref": "EnvironmentType"} }
+          ]
+        }
+      }
+    },
+
+    "Outputs" : {
+      "JDBCConnectionString": {
+        "Description" : "JDBC connection string for database",
+        "Value" : { "Fn::Join": [ "", [ "jdbc:mysql://",
+                                        { "Fn::GetAtt": [ "RDSMySQLDB", "Endpoint.Address" ] },
+                                        ":",
+                                        { "Fn::GetAtt": [ "RDSMySQLDB", "Endpoint.Port" ] },
+                                        "/",
+                                        { "Ref": "DBName" }]]}
+      }
+    }
+}

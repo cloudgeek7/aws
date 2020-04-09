@@ -1,0 +1,118 @@
+{
+   "AWSTemplateFormatVersion" : "2010-09-09",
+   "Description" : "Creates Application Load Balancer (ALB), Target Group and HTTPS Listener (443) in a private Subnet - MadhuKumar - 09April2020",
+
+   "Parameters" : {
+     "TemplateVersion":{
+       "Default": "1.0",
+       "Description": "Version of the CloudFormation template. All parameters with sensitive information should be secured in a vault (e.g. Parameter Store and Secrets Manager)",
+       "Type":"String"
+     },
+      "ALBName" : {
+         "Default": "mk-test-alb",
+         "Description": "Name of the Application Load Balancer.",
+         "Type":"String"
+      },
+      "ACMPublicCertificate":{
+         "Description": "ACM Public Certificate ARN to use for ALB 443 listener",
+         "Type": "String"
+      },
+     "ResourceType":{
+       "Type": "String",
+       "Default" : "Application",
+       "AllowedValues" : [ "Network", "Application", "Database" ],
+       "Description": "Enter Network, Application, Database. Default is Application"
+     },
+     "EnvironmentType":{
+       "Type": "String",
+       "Default" : "Development",
+       "AllowedValues" : [ "Development", "Testing", "Production" ],
+       "Description": "Enter relevant Environment e.g. Development, Testing, Production. Default is Development"
+     },
+      "ALBAvailability" : {
+         "Default": "internal",
+         "Description": "Availability of the ALB (internal or external).",
+         "Type":"String"
+     },
+      "ALBSecurityGroup":{
+         "Type": "AWS::EC2::SecurityGroup::Id",
+         "Description": "Choose a Security Group to associate to ALB."
+      },
+     "TargetGroupName":{
+       "Default": "mk-test-alb-tg",
+       "Description": "Enter a Name for the TargetGroup",
+       "Type": "String"
+     },
+     "TargetGroupVpcId": {
+         "Description": "VPC ID of the target group",
+         "Type": "AWS::EC2::VPC::Id"
+      },
+      "SubnetAZ1": {
+         "Description": "Name of the Subnet for Availability Zone 1",
+         "Type": "AWS::EC2::Subnet::Id"
+      },
+      "SubnetAZ2": {
+         "Description": "Name of the Subnet for Availability Zone 2",
+         "Type": "AWS::EC2::Subnet::Id"
+      }
+   },
+
+   "Resources" :{
+         "apploadbalancer" :{
+               "Type" : "AWS::ElasticLoadBalancingV2::LoadBalancer",
+               "Properties" :{
+                     "IpAddressType" : "ipv4",
+                     "Name" : {"Ref":"ALBName"},
+                     "Scheme" : {"Ref": "ALBAvailability"},
+                     "Type" : "application",
+                     "SecurityGroups" :
+                        [
+                           {"Ref":"ALBSecurityGroup"}
+                        ],
+                     "Subnets" :
+                        [
+                           {"Ref":"SubnetAZ1"},
+                           {"Ref":"SubnetAZ2"}
+                        ],
+                     "Tags" :
+                        [ {  "Key" : "Resource", "Value" : {"Ref": "ResourceType"} },
+                          {  "Key" : "Environment", "Value" : {"Ref": "EnvironmentType"} }
+                        ]
+               }
+         },
+         "albtargetgroup" :{
+               "Type" : "AWS::ElasticLoadBalancingV2::TargetGroup",
+               "Properties" : {
+                     "Name" : {"Ref": "TargetGroupName"},
+                     "Port" : 443,
+                     "Protocol" : "HTTPS",
+                     "TargetType" : "instance",
+                     "HealthCheckPath" : "/login",
+                     "VpcId" : {"Ref": "TargetGroupVpcId"},
+                     "Tags" :
+                        [ {  "Key" : "Resource", "Value" : {"Ref": "ResourceType"} },
+                          {  "Key" : "Environment", "Value" : {"Ref": "EnvironmentType"} }
+                        ]
+               }
+         },
+         "alblistener" :{
+               "Type" : "AWS::ElasticLoadBalancingV2::Listener",
+               "Properties" :{
+                     "LoadBalancerArn" : {"Ref" : "apploadbalancer"},
+                     "DefaultActions" :
+                        [
+                           {
+                              "Type" : "forward",
+                              "TargetGroupArn" :{"Ref" : "albtargetgroup"}
+                           }
+                        ],
+                     "Port" : "443",
+                     "Protocol" : "HTTPS",
+                     "SslPolicy" : "ELBSecurityPolicy-FS-1-2-Res-2019-08",
+                     "Certificates" : [{
+                        "CertificateArn": {"Ref": "ACMPublicCertificate"}
+                     }]
+               }
+         }
+   }
+}
