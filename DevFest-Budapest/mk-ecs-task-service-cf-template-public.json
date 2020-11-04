@@ -1,0 +1,67 @@
+{
+   "AWSTemplateFormatVersion" : "2010-09-09",
+
+   "Description" : "Amazon ECS Preview Quickstart Template to create ECS Task and Service - MadhuKumar - 01Nov2020",
+
+   "Parameters" : {
+
+      "ECSCluster": {
+         "Description" : "Name of your Amazon ECS Cluster",
+         "Type" : "String",
+         "ConstraintDescription" : "must be a valid Amazon ECS Cluster.",
+         "Default" : "mk-ecs-cluster"
+      },
+
+     "ECSTaskRole" :
+     {
+      "Type" : "String",
+      "Default" : "arn:aws:iam::808065542248:role/ecsTaskExecutionRole",
+      "Description" : "Enter the ECS Task Execution Role"
+     }
+   },
+   "Resources" : {
+      "ECSTaskDefinition": {
+         "Type": "AWS::ECS::TaskDefinition",
+         "Properties" : {
+            "TaskRoleArn": { "Ref": "ECSTaskRole" },
+            "ExecutionRoleArn": { "Ref": "ECSTaskRole" },
+            "requiresCompatibilities": [ "EC2" ],
+            "containerDefinitions": [
+               {
+                  "entryPoint": [
+                     "sh",
+                     "-c"
+                  ],
+                  "portMappings": [
+                     {
+                        "hostPort": 80,
+                        "protocol": "tcp",
+                        "containerPort": 80
+                     }
+                  ],
+                  "command": [
+                     "/bin/sh -c \"echo '<html> <head> <title>Amazon ECS Sample App</title> <style>body {margin-top: 40px; background-color: #333;} </style> </head><body> <div style=color:white;text-align:center> <h1>Amazon ECS Sample App</h1> <h2>Congratulations!</h2> <p>Your application is now running on a container in Amazon ECS.</p> </div></body></html>' >  /usr/local/apache2/htdocs/index.html && httpd-foreground\""
+                  ],
+                  "cpu": 10,
+                  "memory": 300,
+                  "image": "httpd:latest",
+                  "name": "simple-app-mk"
+               }
+            ],
+            "volumes": [],
+            "networkMode": "bridge",
+            "placementConstraints": [],
+            "family": "httpd-mk"
+         }
+      },
+
+      "ECSService": {
+         "Type": "AWS::ECS::Service",
+         "Properties" : {
+            "Cluster": { "Ref": "ECSCluster" },
+            "DesiredCount": 1,
+            "TaskDefinition" : { "Ref": "ECSTaskDefinition" }
+         }
+      }
+   }
+}
